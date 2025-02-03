@@ -6,11 +6,10 @@ import { useParams, useSearchParams } from 'next/navigation';
 import clsx from "clsx";
 import axios from "axios";
 
+import { createClient } from '@/utils/supabase/client'
+
 export default function Page() {
-  // const [rows, setRows] = useState(8);
-  // const [columns, setColumns] = useState(8);
-  // const [dotSize, setDotSize] = useState(12);
-  // const [dotSpacing, setDotSpacing] = useState(60);
+  const supabase = createClient()
   const rows = 8;
   const columns = 8;
   const dotSize = 12;
@@ -30,24 +29,53 @@ export default function Page() {
 
   const params = useParams<{ slug: string }>();
   const searchParams = useSearchParams();
-  const updateInterval = 1000; // Update interval in milliseconds
+
+  const channel = supabase.channel(`multiplayer:${params.slug}`)
 
   async function fetchGameState() {
-    const response = await axios.get(`/api/multiplayer/${params.slug}`);
-    const gameState = response.data;
-    if (gameState) {
-      setSquares(gameState.squares);
-      setCurrentPlayer(gameState.currentPlayer);
-      setTurnNumber(gameState.turnNumber);
-      setScores(gameState.scores);
-      setEdges(gameState.edges || {}); // Ensure edges are set
+    try{
+      const response = await axios.get(`/api/multiplayer/${params.slug}`);
+      const data = response.data;
+      
+      if (JSON.stringify(data.squares) !== JSON.stringify(squares)) {
+        setSquares(data.squares);
+      }
+      if (data.currentplayer !== currentPlayer) {
+        setCurrentPlayer(data.currentplayer);
+      }
+      if (data.turnnumber !== turnNumber) {
+        setTurnNumber(data.turnnumber);
+      }
+      if (JSON.stringify(data.scores) !== JSON.stringify(scores)) {
+        setScores(data.scores);
+      }
+      if (JSON.stringify(data.edges) !== JSON.stringify(edges)) {
+        setEdges(data.edges || {});
+      }
       setIsLoaded(true);
+    }
+    catch(error){
+      console.error("Error fetching game state:", error);
     }
   }
 
   useEffect(() => {
-    fetchGameState();
-  }, [params.slug]);
+    fetchGameState()
+  }, [])
+
+  channel
+    .on('postgres_changes', 
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'games',
+        filter: `slug=eq.${params.slug}`
+      },
+      () => {
+        fetchGameState()
+      }
+    )
+    .subscribe()
 
   useEffect(() => {
     const assignedPlayer = searchParams.get('player') as "p1" | "p2";
@@ -56,32 +84,17 @@ export default function Page() {
     }
   }, [searchParams]);
 
-  useEffect(() => {
-    if (currentPlayer !== player) {
-      const interval = setInterval(() => {
-        fetchGameState();
-      }, updateInterval);
-      return () => clearInterval(interval);
-    }
-  }, [currentPlayer, player]);
-
-  const updateGameState = async (row: number, col: number, direction: "h" | "v") => {
-    const response = await axios.post(`/api/multiplayer/${params.slug}`, { row, col, direction });
-    const gameState = response.data;
-    setSquares(gameState.squares);
-    setCurrentPlayer(gameState.currentPlayer);
-    setTurnNumber(gameState.turnNumber);
-    setScores(gameState.scores);
-    setEdges(gameState.edges || {});
-  };
-
-  const handleClick = (row: number, col: number, direction: "h" | "v") => {
+  const handleClick = async (row: number, col: number, direction: "h" | "v") => {
     if (currentPlayer !== player) return;
 
     const key = `${row}-${col}-${direction}`;
     if (edges[key]) return;
 
-    updateGameState(row, col, direction);
+    try {
+      await axios.post(`/api/multiplayer/${params.slug}`, { action: { row, col, direction }, gameState: { squares, currentplayer: currentPlayer, turnnumber: turnNumber, scores, edges } });
+    } catch (error) {
+      console.error("Error updating game state:", error);
+    }
   };
 
   if (!isLoaded) {
@@ -93,7 +106,7 @@ export default function Page() {
       <p className="mb-4 text-lg font-semibold">
         Current Turn:{" "}
         <span className="text-blue-600">{turnNumber}</span> -{" "}
-        <span className="text-blue-600">{currentPlayer.toUpperCase()}</span>
+        <span className="text-blue-600">{currentPlayer?.toUpperCase()}</span>
       </p>
       <p className="mb-4 text-lg font-semibold">
         Score - P1: <span className="text-red-500">{scores.p1}</span> | P2:{" "}

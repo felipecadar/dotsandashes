@@ -1,112 +1,80 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Redis } from '@upstash/redis';
-
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
-});
+import { applyAction, GameState } from '@/lib/game';
+import { createClient } from '@/utils/supabase/server';
 
 const initialState = {
-  squares: {} as { [key: string]: string },
-  currentPlayer: "p1" as "p1" | "p2",
-  turnNumber: 1,
-  scores: { p1: 0, p2: 0 } as { p1: number; p2: number },
-  edges: {} as { [key: string]: { player: string; turn: number } },
-};
+  squares: {},
+  currentplayer: "p1",
+  turnnumber: 1,
+  scores: { p1: 0, p2: 0 },
+  edges: {},
+} as GameState;
 
 export async function GET(req: NextRequest) {
+  const supabase = await createClient();
+
   const slug = req.nextUrl.pathname.split('/').pop();
+  // const channel = await supabase.channel(`multiplayer:${slug}`);
+  // console.log("Channel:", `multiplayer:${slug}`);
   
   if (!slug) {
     return NextResponse.json({ message: 'Slug is required' }, { status: 400 });
   }
 
-  let gameState = await redis.get(slug) as typeof initialState | null;
-  if (!gameState) {
-    gameState = initialState;
-    await redis.set(slug, gameState);
+  const { data, error } = await supabase
+    .from('games')
+    .select('*')
+    .eq('slug', slug)
+    .single();
+
+  if (error && error.details !== 'The result contains 0 rows') {
+    console.error("Error fetching game state:", error);
+    return NextResponse.json({ message: 'Error fetching game state' }, { status: 500 });
   }
-  return NextResponse.json(gameState);
+
+  if (!data) {
+    const { error: insertError } = await supabase
+      .from('games')
+      .insert([{ 
+        slug, 
+        ...initialState
+       }]);
+    
+    if (insertError) {
+      console.error("Error inserting initial game state:", insertError);
+      return NextResponse.json({ message: 'Error inserting initial game state' }, { status: 500 });
+    }
+    // sendGameState(channel, initialState);
+    return NextResponse.json(initialState);
+  }
+
+  // sendGameState(channel, data);
+  return NextResponse.json(data);
 }
 
 export async function POST(req: NextRequest) {
+  const supabase = await createClient();
   const slug = req.nextUrl.pathname.split('/').pop();
 
   if (!slug) {
     return NextResponse.json({ message: 'Slug is required' }, { status: 400 });
   }
 
-  const { row, col, direction } = await req.json();
-  let gameState = await redis.get(slug) as typeof initialState | null;
+  const { gameState: receivedGameState, action } = await req.json();
+  // console.log("Received game state:", receivedGameState);
+  
+  let gameState = receivedGameState || initialState;
 
-  if (!gameState) {
-    gameState = initialState;
+  gameState = applyAction(gameState, action);
+  const { error } = await supabase
+    .from('games')
+    .update(gameState)
+    .eq('slug', slug);
+
+  if (error) {
+    console.error("Error updating game state:", error);
+    return NextResponse.json({ message: 'Error updating game state' }, { status: 500 });
   }
-
-  const key = `${row}-${col}-${direction}`;
-  if (gameState.edges[key]) {
-    return NextResponse.json(gameState);
-  }
-
-  gameState.edges[key] = { player: gameState.currentPlayer, turn: gameState.turnNumber };
-
-  let squareCompleted = false;
-  const newSquares = { ...gameState.squares };
-  let completedSquaresCount = 0;
-
-  if (direction === "h") {
-    if (
-      row > 0 &&
-      gameState.edges[`${row - 1}-${col}-h`] &&
-      gameState.edges[`${row - 1}-${col}-v`] &&
-      gameState.edges[`${row - 1}-${col + 1}-v`]
-    ) {
-      newSquares[`${row - 1}-${col}`] = gameState.currentPlayer;
-      squareCompleted = true;
-      completedSquaresCount++;
-    }
-    if (
-      row < 7 &&
-      gameState.edges[`${row}-${col}-v`] &&
-      gameState.edges[`${row + 1}-${col}-h`] &&
-      gameState.edges[`${row}-${col + 1}-v`]
-    ) {
-      newSquares[`${row}-${col}`] = gameState.currentPlayer;
-      squareCompleted = true;
-      completedSquaresCount++;
-    }
-  } else {
-    if (
-      col > 0 &&
-      gameState.edges[`${row}-${col - 1}-v`] &&
-      gameState.edges[`${row}-${col - 1}-h`] &&
-      gameState.edges[`${row + 1}-${col - 1}-h`]
-    ) {
-      newSquares[`${row}-${col - 1}`] = gameState.currentPlayer;
-      squareCompleted = true;
-      completedSquaresCount++;
-    }
-    if (
-      col < 7 &&
-      gameState.edges[`${row}-${col + 1}-v`] &&
-      gameState.edges[`${row}-${col}-h`] &&
-      gameState.edges[`${row + 1}-${col}-h`]
-    ) {
-      newSquares[`${row}-${col}`] = gameState.currentPlayer;
-      squareCompleted = true;
-      completedSquaresCount++;
-    }
-  }
-
-  gameState.squares = newSquares;
-  if (squareCompleted) {
-    gameState.scores[gameState.currentPlayer] += completedSquaresCount;
-  } else {
-    gameState.currentPlayer = gameState.currentPlayer === "p1" ? "p2" : "p1";
-  }
-
-  gameState.turnNumber += 1;
-  await redis.set(slug, gameState);
 
   return NextResponse.json(gameState);
 }
