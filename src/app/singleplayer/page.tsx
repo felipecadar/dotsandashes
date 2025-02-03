@@ -3,11 +3,13 @@
 import { useState } from "react";
 import clsx from "clsx";
 
-export default function Page({ params }: { params: { slug: string } }) {
+export default function Page() {
   const [rows, setRows] = useState(8);
   const [columns, setColumns] = useState(8);
-  const [dotSize, setDotSize] = useState(12);
-  const [dotSpacing, setDotSpacing] = useState(60);
+  // const [dotSize, setDotSize] = useState(12);
+  // const [dotSpacing, setDotSpacing] = useState(60);
+  const dotSize = 12;
+  const dotSpacing = 60;
   const [edges, setEdges] = useState<{
     [key: string]: { player: string; turn: number };
   }>({});
@@ -101,6 +103,26 @@ export default function Page({ params }: { params: { slug: string } }) {
   return (
     <div className="flex flex-col items-center p-4">
       <h2 className="text-2xl font-bold mb-4">Dots and Boxes</h2>
+      <div className="flex gap-4 mb-4">
+        <div>
+          <label className="block text-lg font-semibold mb-2">Rows:</label>
+          <input
+            type="number"
+            value={rows}
+            onChange={(e) => setRows(Number(e.target.value))}
+            className="w-20 p-2 border border-gray-300 rounded"
+          />
+        </div>
+        <div>
+          <label className="block text-lg font-semibold mb-2">Columns:</label>
+          <input
+            type="number"
+            value={columns}
+            onChange={(e) => setColumns(Number(e.target.value))}
+            className="w-20 p-2 border border-gray-300 rounded"
+          />
+        </div>
+      </div>
       <p className="mb-4 text-lg font-semibold">
         Current Turn:{" "}
         <span className="text-blue-600">{currentPlayer.toUpperCase()}</span>
