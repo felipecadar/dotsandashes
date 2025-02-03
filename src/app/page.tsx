@@ -22,7 +22,7 @@ function createSessionId() {
 export default function Home() {
   const [gameCode, setGameCode] = useState("")
   const [error, setError] = useState("")
-  const [assignedPlayer, setAssignedPlayer] = useState<"p1" | "p2">("p1")
+  const [assignedPlayer, setAssignedPlayer] = useState<"p1" | "p2">("p2")
   const router = useRouter()
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
