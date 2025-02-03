@@ -2,9 +2,9 @@
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 import { useState } from "react"
 import { useRouter } from 'next/navigation'
-
 
 function createSessionId() {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -22,6 +22,7 @@ function createSessionId() {
 export default function Home() {
   const [gameCode, setGameCode] = useState("")
   const [error, setError] = useState("")
+  const [assignedPlayer, setAssignedPlayer] = useState<"p1" | "p2">("p1")
   const router = useRouter()
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -38,7 +39,7 @@ export default function Home() {
     if (!pattern.test(gameCode)) {
       setError("Invalid game code format. Expected format: ABC-123")
     } else {
-      // Proceed with joining the game
+      router.push(`/multiplayer/${gameCode}?player=${assignedPlayer}`)
     }
   }
 
@@ -47,8 +48,8 @@ export default function Home() {
   }
 
   const handleCreateOnlineGame = () => {
-    const randomCode = `SDC-${Math.floor(100 + Math.random() * 900)}`
-    router.push(`/multiplayer/${randomCode}?player=p1&sessionId=${createSessionId()}`)
+    const randomCode = createSessionId()
+    router.push(`/multiplayer/${randomCode}?player=p1`)
   }
 
   return (
@@ -68,6 +69,15 @@ export default function Home() {
             maxLength={7}
           />
           {error && <p className="text-red-500">{error}</p>}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="w-64 text-center bg-white text-black">{assignedPlayer === "p1" ? "Player 1" : "Player 2"}</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => setAssignedPlayer("p1")}>Player 1</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setAssignedPlayer("p2")}>Player 2</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         <Button className="w-40 " onClick={handleJoinGame}>Join a Game</Button>
       </div>

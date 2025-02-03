@@ -27,7 +27,6 @@ export default function Page() {
   });
   const [isLoaded, setIsLoaded] = useState(false);
   const [player, setPlayer] = useState<"p1" | "p2">("p1");
-  const [sessionId, setSessionId] = useState<string>("");
 
   const params = useParams<{ slug: string }>();
   const searchParams = useSearchParams();
@@ -52,12 +51,8 @@ export default function Page() {
 
   useEffect(() => {
     const assignedPlayer = searchParams.get('player') as "p1" | "p2";
-    const sessionId = searchParams.get('sessionId') as string;
     if (assignedPlayer) {
       setPlayer(assignedPlayer);
-    }
-    if (sessionId) {
-      setSessionId(sessionId);
     }
   }, [searchParams]);
 
@@ -105,7 +100,7 @@ export default function Page() {
         <span className="text-green-500">{scores.p2}</span>
       </p>
       <p className="mb-4 text-lg font-semibold">
-        Session ID: <span className="text-gray-500">{sessionId}</span>
+        Session ID: <span className="text-gray-500">{params.slug}</span>
       </p>
       <p className="mb-4 text-lg font-semibold">
         You are:{" "}
