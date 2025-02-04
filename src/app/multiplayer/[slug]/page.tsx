@@ -1,154 +1,177 @@
 "use client";
-
-import { useState, useEffect } from "react";
-import { useParams, useSearchParams } from 'next/navigation';
-
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import clsx from "clsx";
 import axios from "axios";
+import { createClient } from "@/utils/supabase/client";
 
-import { createClient } from '@/utils/supabase/client'
-
+const ROWS = 8,
+  COLUMNS = 8;
 export default function Page() {
-  const supabase = createClient()
-  const rows = 8;
-  const columns = 8;
-  // const dotSize = 12;
+  const supabase = useMemo(() => createClient(), []);
   const [dotSize, setDotSize] = useState(12);
   const [dotSpacing, setDotSpacing] = useState(60);
-  const [edges, setEdges] = useState<{
-    [key: string]: { player: string; turn: number };
-  }>({});
-  const [squares, setSquares] = useState<{ [key: string]: string }>({});
-  const [currentPlayer, setCurrentPlayer] = useState<"p1" | "p2">("p1");
+  const [edges, setEdges] = useState<Record<string, { player: string }>>({});
+  const [squares, setSquares] = useState<Record<string, string>>({});
+  const [currentPlayer, setCurrentPlayer] = useState("p1");
   const [turnNumber, setTurnNumber] = useState(1);
-  const [scores, setScores] = useState<{ p1: number; p2: number }>({
-    p1: 0,
-    p2: 0,
-  });
+  const [scores, setScores] = useState({ p1: 0, p2: 0 });
   const [isLoaded, setIsLoaded] = useState(false);
   const [player, setPlayer] = useState<"p1" | "p2">("p1");
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const [onlinePlayers, setOnlinePlayers] = useState<string[]>([]);
 
-  const params = useParams<{ slug: string }>();
+  const params = useParams();
   const searchParams = useSearchParams();
 
-  const channel = supabase.channel(`multiplayer:${params.slug}`)
-
-  async function fetchGameState() {
-    try{
-      const response = await axios.get(`/api/multiplayer/${params.slug}`);
-      const data = response.data;
-      
-      if (JSON.stringify(data.squares) !== JSON.stringify(squares)) {
+  const fetchGameState = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`/api/multiplayer/${params.slug}`);
+      if (JSON.stringify(data.squares) !== JSON.stringify(squares))
         setSquares(data.squares);
-      }
-      if (data.currentplayer !== currentPlayer) {
+      if (data.currentplayer !== currentPlayer)
         setCurrentPlayer(data.currentplayer);
-      }
-      if (data.turnnumber !== turnNumber) {
-        setTurnNumber(data.turnnumber);
-      }
-      if (JSON.stringify(data.scores) !== JSON.stringify(scores)) {
+      if (data.turnnumber !== turnNumber) setTurnNumber(data.turnnumber);
+      if (JSON.stringify(data.scores) !== JSON.stringify(scores))
         setScores(data.scores);
-      }
-      if (JSON.stringify(data.edges) !== JSON.stringify(edges)) {
+      if (JSON.stringify(data.edges) !== JSON.stringify(edges))
         setEdges(data.edges || {});
-      }
       setIsLoaded(true);
-    }
-    catch(error){
+    } catch (error) {
       console.error("Error fetching game state:", error);
     }
-  }
+  }, [params.slug, squares, currentPlayer, turnNumber, scores, edges]);
 
   useEffect(() => {
-    fetchGameState()
-  }, [])
-
-  channel
-    .on('postgres_changes', 
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'games',
-        filter: `slug=eq.${params.slug}`
-      },
-      () => {
-        fetchGameState()
-      }
-    )
-    .subscribe()
+    fetchGameState();
+  }, [fetchGameState]);
 
   useEffect(() => {
-    const assignedPlayer = searchParams.get('player') as "p1" | "p2";
-    if (assignedPlayer) {
-      setPlayer(assignedPlayer);
-    }
+    const channel = supabase
+      .channel(`multiplayer:${params.slug}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "games",
+          filter: `slug=eq.${params.slug}`,
+        },
+        fetchGameState
+      )
+      .subscribe();
+    return () => {
+      void channel.unsubscribe();
+    };
+  }, [params.slug, supabase, fetchGameState]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`multiplayer:${params.slug}`)
+      .on("presence", { event: "sync" }, () => {
+        const state = channel.presenceState();
+        setOnlinePlayers(Object.keys(state));
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") channel.track({ player });
+      });
+    return () => {
+      void channel.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const assigned = searchParams.get("player");
+    if (assigned === "p1" || assigned === "p2") setPlayer(assigned);
   }, [searchParams]);
 
   useEffect(() => {
-    function updateDotSpacing() {
-      const calculated = (window.innerWidth * 0.9) / columns;
-      setDotSpacing(Math.min(60, Math.max(20, calculated)));
-      setDotSize(Math.min(12, Math.max(8, calculated / 4)));
-    }
-    updateDotSpacing();
-    window.addEventListener('resize', updateDotSpacing);
-    return () => window.removeEventListener('resize', updateDotSpacing);
+    const updateSpacing = () => {
+      const calc = (window.innerWidth * 0.9) / COLUMNS;
+      setDotSpacing(Math.min(60, Math.max(20, calc)));
+      setDotSize(Math.min(12, Math.max(8, calc / 4)));
+    };
+    updateSpacing();
+    window.addEventListener("resize", updateSpacing);
+    return () => window.removeEventListener("resize", updateSpacing);
   }, []);
 
-  const handleClick = async (row: number, col: number, direction: "h" | "v") => {
-    if (currentPlayer !== player) return;
+  useEffect(() => {
+    if (window.matchMedia("(hover: none)").matches) setIsTouchDevice(true);
+  }, []);
 
-    const key = `${row}-${col}-${direction}`;
-    if (edges[key]) return;
+  const handleClick = useCallback(
+    async (row: number, col: number, direction: "h" | "v") => {
+      if (currentPlayer !== player) return;
+      const key = `${row}-${col}-${direction}`;
+      if (edges[key]) return;
+      try {
+        await axios.post(`/api/multiplayer/${params.slug}`, {
+          action: { row, col, direction },
+          gameState: {
+            squares,
+            currentplayer: currentPlayer,
+            turnnumber: turnNumber,
+            scores,
+            edges,
+          },
+        });
+      } catch (error) {
+        console.error("Error updating game state:", error);
+      }
+    },
+    [currentPlayer, player, edges, params.slug, squares, turnNumber, scores]
+  );
 
-    try {
-      await axios.post(`/api/multiplayer/${params.slug}`, { action: { row, col, direction }, gameState: { squares, currentplayer: currentPlayer, turnnumber: turnNumber, scores, edges } });
-    } catch (error) {
-      console.error("Error updating game state:", error);
-    }
-  };
-
-  if (!isLoaded) {
-    return <div>Loading...</div>;
-  }
+  if (!isLoaded) return <div>Loading...</div>;
 
   return (
     <div className="flex flex-col items-center p-4">
-      <p className="mb-4 text-lg font-semibold">
-        Current Turn:{" "}
-        <span className="text-blue-600">{turnNumber}</span> -{" "}
-        <span className="text-blue-600">{currentPlayer?.toUpperCase()}</span>
-      </p>
-      <p className="mb-4 text-lg font-semibold">
-        Score - P1: <span className="text-red-500">{scores.p1}</span> | P2:{" "}
-        <span className="text-green-500">{scores.p2}</span>
-      </p>
-      <p className="mb-4 text-lg font-semibold">
-        Session ID: <span className="text-gray-500">{params.slug}</span>
-      </p>
-      <p className="mb-4 text-lg font-semibold">
-        You are:{" "}
-        <span className={player === "p1" ? "text-red-500" : "text-green-500"}>
-          {player.toUpperCase()}
+      <div className="mb-4 rounded-lg shadow-lg bg-white p-4">
+        <h2 className="text-center text-xl font-bold mb-4">Score</h2>
+        <div className="text-center text-sm text-blue-500 mb-2">
+          {currentPlayer === player ? "Your Turn" : "Wait..."}
+        </div>
+        <div className="flex justify-around gap-4">
+          <div className="flex flex-col items-center">
+        <span className="text-sm text-gray-500">You</span>
+        <span className="mt-1 text-3xl font-bold text-green-600">
+          {scores[player]}
         </span>
-      </p>
-
+          </div>
+          <div className="flex flex-col items-center">
+        <span className="text-sm text-gray-500">Enemy</span>
+        <span className="mt-1 text-3xl font-bold text-red-600">
+          {scores[player === "p1" ? "p2" : "p1"]}
+        </span>
+          </div>
+        </div>
+      </div>
+      <div className="mb-4 grid grid-cols-2 gap-4 text-base">
+        <div className="flex flex-col space-y-2">
+          <div>
+        <strong>Online:</strong> {onlinePlayers.length}
+          </div>
+        </div>
+        <div className="flex flex-col space-y-2">
+          <div>
+        <strong>Session:</strong>{" "}
+        <span className="text-gray-500">{params.slug}</span>
+          </div>
+        </div>
+      </div>
       <div
         className="grid gap-0 ml-10"
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${columns}, ${dotSpacing}px)`,
-        }}
+        style={{ gridTemplateColumns: `repeat(${COLUMNS}, ${dotSpacing}px)` }}
       >
-        {[...Array(rows)].map((_, row) =>
-          [...Array(columns)].map((_, col) => (
+        {Array.from({ length: ROWS }).map((_, row) =>
+          Array.from({ length: COLUMNS }).map((_, col) => (
             <div
               key={`cell-${row}-${col}`}
               className="relative"
               style={{
-                width: `${dotSpacing}px`,
-                height: `${dotSpacing}px`,
+                width: dotSpacing,
+                height: dotSpacing,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -159,62 +182,61 @@ export default function Page() {
                 <div
                   className={clsx(
                     "absolute w-full h-full",
-                    squares[`${row}-${col}`] === "p1"
-                      ? "bg-red-300"
-                      : "bg-green-300"
+                    squares[`${row}-${col}`] === player
+                      ? "bg-green-300"
+                      : "bg-red-300"
                   )}
                 />
               )}
-
-              {col < columns - 1 && (
+              {col < COLUMNS - 1 && (
                 <div
                   className={clsx(
-                    "absolute cursor-pointer hover:bg-gray-500 transition-colors duration-200",
+                    "absolute cursor-pointer transition-colors duration-200",
+                    !isTouchDevice && "hover:bg-gray-500",
                     edges[`${row}-${col}-h`]
-                      ? edges[`${row}-${col}-h`].player === "p1"
-                        ? "bg-red-500"
-                        : "bg-green-500"
+                      ? edges[`${row}-${col}-h`].player === player
+                        ? "bg-green-500"
+                        : "bg-red-500"
                       : "bg-gray-200"
                   )}
                   style={{
-                    width: `${dotSpacing}px`,
-                    height: `${dotSize / 3}px`,
-                    top: `-${dotSize / 6}px`,
-                    left: `0px`,
+                    width: dotSpacing,
+                    height: dotSize / 3,
+                    top: -dotSize / 6,
+                    left: 0,
                   }}
                   onClick={() => handleClick(row, col, "h")}
                 />
               )}
-
-              {row < rows - 1 && (
+              {row < ROWS - 1 && (
                 <div
                   className={clsx(
-                    "absolute cursor-pointer hover:bg-gray-500 transition-colors duration-200",
+                    "absolute cursor-pointer transition-colors duration-200",
+                    !isTouchDevice && "hover:bg-gray-500",
                     edges[`${row}-${col}-v`]
-                      ? edges[`${row}-${col}-v`].player === "p1"
-                        ? "bg-red-500"
-                        : "bg-green-500"
+                      ? edges[`${row}-${col}-v`].player === player
+                        ? "bg-green-500"
+                        : "bg-red-500"
                       : "bg-gray-200"
                   )}
                   style={{
-                    width: `${dotSize / 3}px`,
-                    height: `${dotSpacing}px`,
-                    left: `-${dotSize / 6}px`,
-                    top: `0px`,
+                    width: dotSize / 3,
+                    height: dotSpacing,
+                    left: -dotSize / 6,
+                    top: 0,
                   }}
                   onClick={() => handleClick(row, col, "v")}
                 />
               )}
-
               <div
                 className="bg-black rounded-full"
                 style={{
-                  width: `${dotSize}px`,
-                  height: `${dotSize}px`,
+                  width: dotSize,
+                  height: dotSize,
                   position: "absolute",
                   zIndex: 2,
-                  top: `-${dotSize / 2}px`,
-                  left: `-${dotSize / 2}px`,
+                  top: -dotSize / 2,
+                  left: -dotSize / 2,
                 }}
               />
             </div>
