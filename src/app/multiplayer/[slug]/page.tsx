@@ -12,8 +12,9 @@ export default function Page() {
   const supabase = createClient()
   const rows = 8;
   const columns = 8;
-  const dotSize = 12;
-  const dotSpacing = 60;
+  // const dotSize = 12;
+  const [dotSize, setDotSize] = useState(12);
+  const [dotSpacing, setDotSpacing] = useState(60);
   const [edges, setEdges] = useState<{
     [key: string]: { player: string; turn: number };
   }>({});
@@ -84,6 +85,17 @@ export default function Page() {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    function updateDotSpacing() {
+      const calculated = (window.innerWidth * 0.9) / columns;
+      setDotSpacing(Math.min(60, Math.max(20, calculated)));
+      setDotSize(Math.min(12, Math.max(8, calculated / 4)));
+    }
+    updateDotSpacing();
+    window.addEventListener('resize', updateDotSpacing);
+    return () => window.removeEventListener('resize', updateDotSpacing);
+  }, []);
+
   const handleClick = async (row: number, col: number, direction: "h" | "v") => {
     if (currentPlayer !== player) return;
 
@@ -123,7 +135,7 @@ export default function Page() {
       </p>
 
       <div
-        className="grid gap-0"
+        className="grid gap-0 ml-10"
         style={{
           display: "grid",
           gridTemplateColumns: `repeat(${columns}, ${dotSpacing}px)`,
