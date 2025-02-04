@@ -59,15 +59,6 @@ export default function Page() {
         },
         fetchGameState
       )
-      .subscribe();
-    return () => {
-      void channel.unsubscribe();
-    };
-  }, [params.slug, supabase, fetchGameState]);
-
-  useEffect(() => {
-    const channel = supabase
-      .channel(`multiplayer:${params.slug}`)
       .on("presence", { event: "sync" }, () => {
         const state = channel.presenceState();
         setOnlinePlayers(Object.keys(state));
@@ -75,10 +66,9 @@ export default function Page() {
       .subscribe((status) => {
         if (status === "SUBSCRIBED") channel.track({ player });
       });
-    return () => {
-      void channel.unsubscribe();
-    };
-  }, []);
+    return () => { void channel.unsubscribe(); };
+  }, [params.slug, supabase, fetchGameState, player]);
+
 
   useEffect(() => {
     const assigned = searchParams.get("player");
