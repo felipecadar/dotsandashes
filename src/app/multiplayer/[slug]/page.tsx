@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import clsx from "clsx";
 import axios from "axios";
@@ -8,7 +8,10 @@ import { createClient } from "@/utils/supabase/client";
 const ROWS = 8,
   COLUMNS = 8;
 export default function Page() {
-  const supabase = useMemo(() => createClient(), []);
+
+  const supabase = createClient();
+
+  // const supabase = useMemo(() => createClient(), []);
   const [dotSize, setDotSize] = useState(12);
   const [dotSpacing, setDotSpacing] = useState(60);
   const [edges, setEdges] = useState<Record<string, { player: string }>>({});
